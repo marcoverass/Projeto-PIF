@@ -1,22 +1,22 @@
-# Compilador
 CC = gcc
-
-# Flags de compilação
 CFLAGS = -Wall -std=c11 -I./cli-lib/include
+LDFLAGS = -lncurses
 
-# Arquivos da biblioteca cli-lib
-SRC_LIB = $(wildcard ./cli-lib/src/*.c)
+SRC = jogo.c \
+      cli-lib/src/keyboard.c \
+      cli-lib/src/screen.c \
+      cli-lib/src/timer.c
 
-# Nome do executável
-EXEC = air_hockey
+TARGET = air_hockey
 
-# Alvo principal
-all: $(EXEC)
+all: $(TARGET)
 
-# Regra de compilação
-$(EXEC): jogo.c
-	$(CC) $(CFLAGS) jogo.c $(SRC_LIB) -o $(EXEC)
+$(TARGET): $(SRC)
+	$(CC) $(CFLAGS) $(SRC) -o $(TARGET) $(LDFLAGS)
 
-# Alvo para limpar arquivos gerados
+run: $(TARGET)
+	./$(TARGET)
+
 clean:
-	rm -f $(EXEC)
+	rm -f $(TARGET)
+
