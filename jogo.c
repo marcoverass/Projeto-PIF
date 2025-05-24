@@ -6,307 +6,250 @@
 #include "keyboard.h"
 #include "timer.h"
 
+#define LARGURA_CAMPO (MAXX - 2)
+#define ALTURA_CAMPO  (MAXY - 6)
+#define LARGURA_TACO  9
+#define SIMBOLO_TACO  '='
+#define SIMBOLO_DISCO 'O'
+#define TEMPO_FRAME   50
+#define TEMPO_JOGO    90
+#define ARQ_RANKING   "ranking.txt"
+#define MAX_RANKING   10
+
 void screenSetChar(int x, int y, char ch) {
     screenGotoxy(x, y);
     putchar(ch);
 }
 
-/* ---------- Constantes ---------- */
-#define FIELD_W   (MAXX - 2)
-#define FIELD_H   (MAXY - 4)
-#define PADDLE_W  7
-#define PUCK_CHAR 'O'
-#define PAD_CHAR  '='
-#define FRAME_MS  50
-#define GAME_TIME 120
-#define HS_FILE   "high_scores.txt"
-#define HS_LIMIT  10
-
-/* ---------- Structs ---------- */
 typedef struct {
     int x;
-} Paddle;
+} Taco;
 
 typedef struct {
     double x, y;
     double vx, vy;
-} Puck;
+} Disco;
 
-typedef struct ScoreEntry {
-    char name[20];
-    int gols;
-    struct ScoreEntry *next;
-} ScoreEntry;
+typedef struct Ranking {
+    char nome[20];
+    int pontos;
+    struct Ranking *next;
+} Ranking;
 
-/* ---------- Globais ---------- */
-static Paddle pad1, pad2;
-static Puck puck;
-static int score1 = 0, score2 = 0;
-static time_t start_time;
-static ScoreEntry *hs_head = NULL;
-static char campo[FIELD_H][FIELD_W];  // MATRIZ ADICIONADA
+Taco taco1, taco2;
+Disco disco;
+int pontos1 = 0, pontos2 = 0;
+time_t inicio;
+Ranking *inicioRanking = NULL;
+char campo[ALTURA_CAMPO][LARGURA_CAMPO];
 
-/* ---------- Campo com matriz ---------- */
-void campoLimpar() {
-    for (int y = 0; y < FIELD_H; ++y)
-        for (int x = 0; x < FIELD_W; ++x)
+void limparCampo() {
+    for (int y = 0; y < ALTURA_CAMPO; y++)
+        for (int x = 0; x < LARGURA_CAMPO; x++)
             campo[y][x] = ' ';
 }
 
-void campoDesenhar() {
-    for (int y = 0; y < FIELD_H; ++y)
-        for (int x = 0; x < FIELD_W; ++x)
-            screenSetChar(x + MINX + 1, y + MINY + 1, campo[y][x]);
-}
-
-/* ---------- Utilitários ---------- */
-void draw_border(void) {
-    for (int x = MINX; x <= MAXX; ++x) {
-        screenSetChar(x, MINY, '#');
+void desenharBorda() {
+    for (int x = MINX; x <= MAXX; x++) {
+        screenSetChar(x, MINY + 2, '#');
         screenSetChar(x, MAXY, '#');
     }
-    for (int y = MINY; y <= MAXY; ++y) {
+    for (int y = MINY + 2; y <= MAXY; y++) {
         screenSetChar(MINX, y, '#');
         screenSetChar(MAXX, y, '#');
     }
 }
 
-void draw_paddles(void) {
-    for (int i = 0; i < PADDLE_W; ++i)
-        campo[0][pad1.x - MINX - 1 + i] = PAD_CHAR;
-    for (int i = 0; i < PADDLE_W; ++i)
-        campo[FIELD_H - 1][pad2.x - MINX - 1 + i] = PAD_CHAR;
-}
-
-void draw_puck(void) {
-    int x = (int)puck.x - MINX - 1;
-    int y = (int)puck.y - MINY - 1;
-    if (x >= 0 && x < FIELD_W && y >= 0 && y < FIELD_H)
-        campo[y][x] = PUCK_CHAR;
-}
-
-void draw_score_and_timer(void) {
-    int elapsed = (int)difftime(time(NULL), start_time);
-    int remaining;
-    if (GAME_TIME - elapsed > 0)
-        remaining = GAME_TIME - elapsed;
-    else
-        remaining = 0;
+void desenharPlacar() {
+    int t = (int)difftime(time(NULL), inicio);
+    int restante;
+    if (TEMPO_JOGO - t > 0) {
+        restante = TEMPO_JOGO - t;
+    } else {
+        restante = 0;
+    }
 
     char info[64];
-    snprintf(info, sizeof(info), "P1 %d  |  Tempo: %02d:%02d  |  P2 %d",
-             score1, remaining / 60, remaining % 60, score2);
-    int len = (int)strlen(info);
-    int start_col = (MAXX - MINX - len) / 2 + MINX + 1;
-    for (int i = 0; i < len; ++i)
-        screenSetChar(start_col + i, MINY + 2, info[i]);
+    snprintf(info, sizeof(info), "J1:%d | Tempo:%02d:%02d | J2:%d", pontos1, restante / 60, restante % 60, pontos2);
+    int col = (MAXX - MINX - (int)strlen(info)) / 2 + MINX;
+    for (int i = 0; info[i]; i++) screenSetChar(col + i, MINY, info[i]);
 }
 
-/* ---------- High Scores ---------- */
-void hs_insert(const char *name, int gols) {
-    ScoreEntry *node = malloc(sizeof(ScoreEntry));
-    if (!node) return;
-    strncpy(node->name, name, sizeof(node->name) - 1);
-    node->name[sizeof(node->name)-1] = '\0';
-    node->gols = gols;
-    node->next = NULL;
+void desenharCampo() {
+    for (int y = 0; y < ALTURA_CAMPO; y++) {
+        for (int x = 0; x < LARGURA_CAMPO - 1; x++) {
+            screenSetChar(x + MINX + 1, y + MINY + 3, campo[y][x]);
+        }
+    }
+}
 
-    if (!hs_head || gols > hs_head->gols) {
-        node->next = hs_head;
-        hs_head = node;
+void desenharTacos() {
+    for (int i = 0; i < LARGURA_TACO; i++)
+        campo[1][taco1.x - MINX - 1 + i] = SIMBOLO_TACO;
+    for (int i = 0; i < LARGURA_TACO; i++)
+        campo[ALTURA_CAMPO - 2][taco2.x - MINX - 1 + i] = SIMBOLO_TACO;
+}
+
+void desenharDisco() {
+    int x = (int)(disco.x - MINX - 1);
+    int y = (int)(disco.y - MINY - 3);
+    if (x >= 0 && x < LARGURA_CAMPO && y >= 0 && y < ALTURA_CAMPO)
+        campo[y][x] = SIMBOLO_DISCO;
+}
+
+void renderizar() {
+    limparCampo();
+    desenharTacos();
+    desenharDisco();
+    desenharCampo();
+    desenharBorda();
+    desenharPlacar();
+    screenUpdate();
+}
+
+void inicializarJogo() {
+    taco1.x = taco2.x = MINX + (LARGURA_CAMPO - LARGURA_TACO) / 2;
+    disco.x = MINX + LARGURA_CAMPO / 2;
+    disco.y = MINY + ALTURA_CAMPO / 2 + 3;
+    disco.vx = 1;
+    disco.vy = 1;
+    inicio = time(NULL);
+}
+
+void verificarColisoes() {
+    if (disco.x <= MINX + 1 || disco.x >= MAXX - 1)
+        disco.vx *= -1;
+
+    if (disco.y <= MINY + 3) {
+        pontos2++;
+        inicializarJogo();
+        return;
+    } else if (disco.y >= MAXY - 1) {
+        pontos1++;
+        inicializarJogo();
         return;
     }
-    ScoreEntry *cur = hs_head;
-    while (cur->next && cur->next->gols >= gols)
+
+    if ((int)disco.y == MINY + 4) {
+        if ((int)disco.x >= taco1.x && (int)disco.x <= taco1.x + LARGURA_TACO)
+            disco.vy *= -1;
+    }
+    if ((int)disco.y == MAXY - 2) {
+        if ((int)disco.x >= taco2.x && (int)disco.x <= taco2.x + LARGURA_TACO)
+            disco.vy *= -1;
+    }
+}
+
+void atualizarDisco() {
+    disco.x += disco.vx;
+    disco.y += disco.vy;
+    verificarColisoes();
+}
+
+void processarTeclas() {
+    if (!keyhit()) return;
+    int ch = readch();
+    switch (ch) {
+        case 'a': case 'A': if (taco1.x > MINX + 1) taco1.x -= 3; break;
+        case 'd': case 'D': if (taco1.x + LARGURA_TACO < MAXX - 1) taco1.x += 3; break;
+        case 27: {
+            int n1 = readch(); int n2 = readch();
+            if (n1 == 91 && n2 == 68 && taco2.x > MINX + 1) taco2.x -= 3;
+            else if (n1 == 91 && n2 == 67 && taco2.x + LARGURA_TACO < MAXX - 1) taco2.x += 3;
+            break;
+        }
+        case 'q': case 'Q': inicio -= TEMPO_JOGO; break;
+    }
+}
+
+void inserirRanking(const char *nome, int pontos) {
+    Ranking *new = malloc(sizeof(Ranking));
+    strcpy(new->nome, nome);
+    new->pontos = pontos;
+    new->next = NULL;
+
+    if (!inicioRanking || pontos > inicioRanking->pontos) {
+        new->next = inicioRanking;
+        inicioRanking = new;
+        return;
+    }
+    Ranking *cur = inicioRanking;
+    while (cur->next && cur->next->pontos >= pontos)
         cur = cur->next;
-    node->next = cur->next;
-    cur->next = node;
+    new->next = cur->next;
+    cur->next = new;
 }
 
-void hs_load(void) {
-    FILE *f = fopen(HS_FILE, "r");
+void salvarRanking() {
+    FILE *f = fopen(ARQ_RANKING, "w");
     if (!f) return;
-    char name[20];
-    int g;
-    while (fscanf(f, "%19s %d", name, &g) == 2)
-        hs_insert(name, g);
-    fclose(f);
-}
-
-void hs_save(void) {
-    FILE *f = fopen(HS_FILE, "w");
-    if (!f) return;
-    ScoreEntry *cur = hs_head;
+    Ranking *cur = inicioRanking;
     int count = 0;
-    while (cur && count < HS_LIMIT) {
-        fprintf(f, "%s %d\n", cur->name, cur->gols);
+    while (cur && count < MAX_RANKING) {
+        fprintf(f, "%s %d\n", cur->nome, cur->pontos);
         cur = cur->next;
-        ++count;
+        count++;
     }
     fclose(f);
 }
 
-void hs_free(void) {
-    ScoreEntry *cur = hs_head;
+void carregarRanking() {
+    FILE *f = fopen(ARQ_RANKING, "r");
+    if (!f) return;
+    char nome[20]; int pontos;
+    while (fscanf(f, "%19s %d", nome, &pontos) == 2)
+        inserirRanking(nome, pontos);
+    fclose(f);
+}
+
+void liberarRanking() {
+    Ranking *cur = inicioRanking;
     while (cur) {
-        ScoreEntry *tmp = cur->next;
+        Ranking *tmp = cur->next;
         free(cur);
         cur = tmp;
     }
 }
 
-/* ---------- Inicialização ---------- */
-void init_game(void) {
-    pad1.x = MINX + (FIELD_W - PADDLE_W) / 2;
-    pad2.x = pad1.x;
-
-    puck.x = MINX + FIELD_W / 2;
-    puck.y = MINY + FIELD_H / 2;
-    puck.vx = 1;
-    puck.vy = 1;
-
-    score1 = score2 = 0;
-    start_time = time(NULL);
-}
-
-/* ---------- Colisões ---------- */
-void check_collisions(void) {
-    if (puck.x <= MINX + 1 || puck.x >= MAXX - 1)
-        puck.vx = -puck.vx;
-
-    if (puck.y <= MINY + 1) {
-        ++score2;
-        init_game();
-        return;
-    }
-    if (puck.y >= MAXY - 1) {
-        ++score1;
-        init_game();
-        return;
-    }
-
-    if ((int)puck.y == MINY + 2) {
-        if ((int)puck.x >= pad1.x && (int)puck.x <= pad1.x + PADDLE_W) {
-            puck.vy = -puck.vy;
-            if (puck.vy < 0) puck.vy -= 0.1;
-        }
-    }
-
-    if ((int)puck.y == MAXY - 2) {
-        if ((int)puck.x >= pad2.x && (int)puck.x <= pad2.x + PADDLE_W) {
-            puck.vy = -puck.vy;
-            if (puck.vy > 0) puck.vy += 0.1;
-        }
-    }
-}
-
-/* ---------- Atualizações ---------- */
-void update_puck(void) {
-    puck.x += puck.vx;
-    puck.y += puck.vy;
-    check_collisions();
-}
-
-void handle_input(void) {
-    if (!keyhit()) return;
-    int ch = readch();
-    switch (ch) {
-        case 'a': case 'A':
-            if (pad1.x > MINX + 1) pad1.x -= 2;
-            break;
-        case 'd': case 'D':
-            if (pad1.x + PADDLE_W < MAXX - 1) pad1.x += 2;
-            break;
-        case 27: {
-            int n1 = readch();
-            int n2 = readch();
-            if (n1 == 91) {
-                if (n2 == 68) {
-                    if (pad2.x > MINX + 1) pad2.x -= 2;
-                } else if (n2 == 67) {
-                    if (pad2.x + PADDLE_W < MAXX - 1) pad2.x += 2;
-                }
-            }
-            break;
-        }
-        case 'q': case 'Q':
-            start_time -= GAME_TIME;
-            break;
-    }
-}
-
-/* ---------- Render ---------- */
-void render(void) {
-    campoLimpar();
-    draw_paddles();
-    draw_puck();
-    campoDesenhar();
-    draw_border();
-    draw_score_and_timer();
-    screenUpdate();
-}
-
-/* ---------- Main ---------- */
-int main(void) {
+int main() {
     screenInit(1);
     keyboardInit();
-    timerInit(FRAME_MS);
-    hs_load();
+    timerInit(TEMPO_FRAME);
 
-    init_game();
-    render();
+    carregarRanking();
+    inicializarJogo();
 
-    while (difftime(time(NULL), start_time) < GAME_TIME) {
-        if (timerTimeOver())
-            update_puck();
-        handle_input();
-        render();
+    while (difftime(time(NULL), inicio) < TEMPO_JOGO) {
+        if (timerTimeOver()) atualizarDisco();
+        processarTeclas();
+        renderizar();
     }
 
-    clear_field();
-    char msg[64];
-    if (score1 > score2) {
-        snprintf(msg, sizeof(msg), "Jogador 1 venceu! (%d x %d)", score1, score2);
-    } else {
-        if (score2 > score1) {
-            snprintf(msg, sizeof(msg), "Jogador 2 venceu! (%d x %d)", score2, score1);
-        } else {
-            snprintf(msg, sizeof(msg), "Empate! (%d x %d)", score1, score2);
-        }
-    }
-
-    int col = (MAXX - MINX - (int)strlen(msg)) / 2 + MINX + 1;
-    int row = MINY + FIELD_H / 2;
-    for (const char *p = msg; *p; ++p)
-        screenSetChar(col++, row, *p);
-    screenUpdate();
-
+    screenDestroy();
     keyboardDestroy();
-    printf("\nDigite seu nome para salvar no ranking: ");
+    timerDestroy();
+
+    printf("\nDigite seu nome: ");
     char nome[20];
     fgets(nome, sizeof(nome), stdin);
     nome[strcspn(nome, "\n")] = 0;
-    if (nome[0]) {
-        if (score1 > score2)
-            hs_insert(nome, score1);
-        else if (score2 > score1)
-            hs_insert(nome, score2);
-        else
-            hs_insert(nome, score1);
-        hs_save();
+    int final;
+    if (pontos1 > pontos2) {
+        final = pontos1;
+    } else {
+        final = pontos2;
     }
+    inserirRanking(nome, final);
+    salvarRanking();
 
-    printf("\n===== TOP %d SCORES =====\n", HS_LIMIT);
-    ScoreEntry *cur = hs_head;
+    printf("\n=== RANKING ===\n");
+    Ranking *cur = inicioRanking;
     int pos = 1;
-    while (cur && pos <= HS_LIMIT) {
-        printf("%2d. %-18s %d\n", pos, cur->name, cur->gols);
+    while (cur && pos <= MAX_RANKING) {
+        printf("%2d. %-15s %d\n", pos++, cur->nome, cur->pontos);
         cur = cur->next;
-        ++pos;
     }
 
-    hs_free();
-    screenDestroy();
-    timerDestroy();
+    liberarRanking();
     return 0;
 }
