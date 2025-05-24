@@ -2,48 +2,65 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include "screen.h"  // desenho no terminal   [oai_citation:0‡GitHub](https://github.com/tgfb/cli-lib/blob/main/include/screen.h?raw=1)
-#include "keyboard.h"  // leitura de teclado    [oai_citation:1‡GitHub](https://github.com/tgfb/cli-lib/blob/main/include/keyboard.h?raw=1)
-#include "timer.h"     // controle de tempo     [oai_citation:2‡GitHub](https://github.com/tgfb/cli-lib/blob/main/include/timer.h?raw=1)
+#include "screen.h"
+#include "keyboard.h"
+#include "timer.h"
 
-void screenSetChar(int x, int y, char ch);
-/* ---------- Constantes de jogo ---------- */
-#define FIELD_W   (MAXX - 2)   /* área útil dentro da moldura da cli-lib */
-#define FIELD_H   (MAXY - 4)   /* duas linhas para placar + molduras */
-#define PADDLE_W  7            /* largura do taco */
+void screenSetChar(int x, int y, char ch) {
+    screenGotoxy(x, y);
+    putchar(ch);
+}
+
+/* ---------- Constantes ---------- */
+#define FIELD_W   (MAXX - 2)
+#define FIELD_H   (MAXY - 4)
+#define PADDLE_W  7
 #define PUCK_CHAR 'O'
 #define PAD_CHAR  '='
-#define FRAME_MS  50           /* taxa de atualização do timer (20 fps) */
-#define GAME_TIME 120          /* duração da partida em segundos */
+#define FRAME_MS  50
+#define GAME_TIME 120
 #define HS_FILE   "high_scores.txt"
-#define HS_LIMIT  10           /* salvar os 10 melhores placares */
+#define HS_LIMIT  10
 
-/* ---------- Estruturas ---------- */
+/* ---------- Structs ---------- */
 typedef struct {
-    int x;                 /* posição horizontal (coluna esquerda) */
+    int x;
 } Paddle;
 
 typedef struct {
-    double x, y;           /* posição (float para movimento suave) */
-    double vx, vy;         /* velocidade */
+    double x, y;
+    double vx, vy;
 } Puck;
 
-/* Lista encadeada para high‑scores */
 typedef struct ScoreEntry {
-    char   name[20];
-    int    gols;           /* gols marcados (placar final) */
+    char name[20];
+    int gols;
     struct ScoreEntry *next;
 } ScoreEntry;
 
-/* ---------- Variáveis globais ---------- */
+/* ---------- Globais ---------- */
 static Paddle pad1, pad2;
-static Puck   puck;
-static int    score1 = 0, score2 = 0;
+static Puck puck;
+static int score1 = 0, score2 = 0;
 static time_t start_time;
-static ScoreEntry *hs_head = NULL;   /* início da lista de high‑scores */
+static ScoreEntry *hs_head = NULL;
+static char campo[FIELD_H][FIELD_W];  // MATRIZ ADICIONADA
 
-/* ---------- Funções utilitárias ---------- */
-static void draw_border(void) {
+/* ---------- Campo com matriz ---------- */
+void campoLimpar() {
+    for (int y = 0; y < FIELD_H; ++y)
+        for (int x = 0; x < FIELD_W; ++x)
+            campo[y][x] = ' ';
+}
+
+void campoDesenhar() {
+    for (int y = 0; y < FIELD_H; ++y)
+        for (int x = 0; x < FIELD_W; ++x)
+            screenSetChar(x + MINX + 1, y + MINY + 1, campo[y][x]);
+}
+
+/* ---------- Utilitários ---------- */
+void draw_border(void) {
     for (int x = MINX; x <= MAXX; ++x) {
         screenSetChar(x, MINY, '#');
         screenSetChar(x, MAXY, '#');
@@ -54,38 +71,39 @@ static void draw_border(void) {
     }
 }
 
-static void clear_field(void) {
-    for (int y = MINY + 1; y < MAXY; ++y)
-        for (int x = MINX + 1; x < MAXX; ++x)
-            screenSetChar(x, y, ' ');
-}
-
-static void draw_paddles(void) {
-    /* Jogador 1 (em cima) */
+void draw_paddles(void) {
     for (int i = 0; i < PADDLE_W; ++i)
-        screenSetChar(pad1.x + i, MINY + 1, PAD_CHAR);
-    /* Jogador 2 (embaixo) */
+        campo[0][pad1.x - MINX - 1 + i] = PAD_CHAR;
     for (int i = 0; i < PADDLE_W; ++i)
-        screenSetChar(pad2.x + i, MAXY - 1, PAD_CHAR);
+        campo[FIELD_H - 1][pad2.x - MINX - 1 + i] = PAD_CHAR;
 }
 
-static void draw_puck(void) {
-    screenSetChar((int)puck.x, (int)puck.y, PUCK_CHAR);
+void draw_puck(void) {
+    int x = (int)puck.x - MINX - 1;
+    int y = (int)puck.y - MINY - 1;
+    if (x >= 0 && x < FIELD_W && y >= 0 && y < FIELD_H)
+        campo[y][x] = PUCK_CHAR;
 }
 
-static void draw_score_and_timer(void) {
+void draw_score_and_timer(void) {
     int elapsed = (int)difftime(time(NULL), start_time);
-    int remaining = (GAME_TIME - elapsed > 0) ? GAME_TIME - elapsed : 0;
+    int remaining;
+    if (GAME_TIME - elapsed > 0)
+        remaining = GAME_TIME - elapsed;
+    else
+        remaining = 0;
+
     char info[64];
-    snprintf(info, sizeof(info), "P1 %d  |  Tempo: %02d:%02d  |  P2 %d", score1, remaining / 60, remaining % 60, score2);
+    snprintf(info, sizeof(info), "P1 %d  |  Tempo: %02d:%02d  |  P2 %d",
+             score1, remaining / 60, remaining % 60, score2);
     int len = (int)strlen(info);
     int start_col = (MAXX - MINX - len) / 2 + MINX + 1;
     for (int i = 0; i < len; ++i)
         screenSetChar(start_col + i, MINY + 2, info[i]);
 }
 
-/* ---------- High‑scores (lista encadeada) ---------- */
-static void hs_insert(const char *name, int gols) {
+/* ---------- High Scores ---------- */
+void hs_insert(const char *name, int gols) {
     ScoreEntry *node = malloc(sizeof(ScoreEntry));
     if (!node) return;
     strncpy(node->name, name, sizeof(node->name) - 1);
@@ -105,17 +123,17 @@ static void hs_insert(const char *name, int gols) {
     cur->next = node;
 }
 
-static void hs_load(void) {
+void hs_load(void) {
     FILE *f = fopen(HS_FILE, "r");
     if (!f) return;
     char name[20];
-    int  g;
+    int g;
     while (fscanf(f, "%19s %d", name, &g) == 2)
         hs_insert(name, g);
     fclose(f);
 }
 
-static void hs_save(void) {
+void hs_save(void) {
     FILE *f = fopen(HS_FILE, "w");
     if (!f) return;
     ScoreEntry *cur = hs_head;
@@ -128,7 +146,7 @@ static void hs_save(void) {
     fclose(f);
 }
 
-static void hs_free(void) {
+void hs_free(void) {
     ScoreEntry *cur = hs_head;
     while (cur) {
         ScoreEntry *tmp = cur->next;
@@ -138,8 +156,8 @@ static void hs_free(void) {
 }
 
 /* ---------- Inicialização ---------- */
-static void init_game(void) {
-    pad1.x = MINX + (FIELD_W - PADDLE_W)/2;
+void init_game(void) {
+    pad1.x = MINX + (FIELD_W - PADDLE_W) / 2;
     pad2.x = pad1.x;
 
     puck.x = MINX + FIELD_W / 2;
@@ -151,96 +169,88 @@ static void init_game(void) {
     start_time = time(NULL);
 }
 
-/* ---------- Colisão ---------- */
-static void check_collisions(void) {
-    /* Paredes laterais */
+/* ---------- Colisões ---------- */
+void check_collisions(void) {
     if (puck.x <= MINX + 1 || puck.x >= MAXX - 1)
         puck.vx = -puck.vx;
 
-    /* Goals (linhas superior e inferior) */
     if (puck.y <= MINY + 1) {
-        ++score2; /* Gol do jogador 2 */
+        ++score2;
         init_game();
         return;
     }
     if (puck.y >= MAXY - 1) {
-        ++score1; /* Gol do jogador 1 */
+        ++score1;
         init_game();
         return;
     }
 
-    /* Tacos – linha do jogador 1 */
     if ((int)puck.y == MINY + 2) {
         if ((int)puck.x >= pad1.x && (int)puck.x <= pad1.x + PADDLE_W) {
             puck.vy = -puck.vy;
-            if (puck.vy < 0) puck.vy -= 0.1; /* acelera */
+            if (puck.vy < 0) puck.vy -= 0.1;
         }
     }
-    /* Tacos – linha do jogador 2 */
+
     if ((int)puck.y == MAXY - 2) {
         if ((int)puck.x >= pad2.x && (int)puck.x <= pad2.x + PADDLE_W) {
             puck.vy = -puck.vy;
-            if (puck.vy > 0) puck.vy += 0.1; /* acelera */
+            if (puck.vy > 0) puck.vy += 0.1;
         }
     }
 }
 
-/* ---------- Atualização de estado ---------- */
-static void update_puck(void) {
+/* ---------- Atualizações ---------- */
+void update_puck(void) {
     puck.x += puck.vx;
     puck.y += puck.vy;
     check_collisions();
 }
 
-static void handle_input(void) {
+void handle_input(void) {
     if (!keyhit()) return;
     int ch = readch();
     switch (ch) {
-        /* jogador 1 – A / D */
         case 'a': case 'A':
             if (pad1.x > MINX + 1) pad1.x -= 2;
             break;
         case 'd': case 'D':
             if (pad1.x + PADDLE_W < MAXX - 1) pad1.x += 2;
             break;
-        /* jogador 2 – setas esquerda/direita */
-        case 27: { /* esc seq */
+        case 27: {
             int n1 = readch();
             int n2 = readch();
             if (n1 == 91) {
-                if (n2 == 68) { /* ← */
+                if (n2 == 68) {
                     if (pad2.x > MINX + 1) pad2.x -= 2;
-                } else if (n2 == 67) { /* → */
+                } else if (n2 == 67) {
                     if (pad2.x + PADDLE_W < MAXX - 1) pad2.x += 2;
                 }
             }
             break;
         }
         case 'q': case 'Q':
-            /* encerrar antes do tempo */
-            start_time -= GAME_TIME; /* força fim */
+            start_time -= GAME_TIME;
             break;
     }
 }
 
 /* ---------- Render ---------- */
-static void render(void) {
-    clear_field();
-    draw_border();
+void render(void) {
+    campoLimpar();
     draw_paddles();
     draw_puck();
+    campoDesenhar();
+    draw_border();
     draw_score_and_timer();
     screenUpdate();
 }
 
-/* ---------- Função principal ---------- */
+/* ---------- Main ---------- */
 int main(void) {
-    /* Inicializações da cli‑lib */
     screenInit(1);
     keyboardInit();
     timerInit(FRAME_MS);
-
-    /* High scores */
     hs_load();
 
     init_game();
@@ -249,40 +259,43 @@ int main(void) {
     while (difftime(time(NULL), start_time) < GAME_TIME) {
         if (timerTimeOver())
             update_puck();
-
         handle_input();
         render();
     }
 
-    /* Fim de jogo – exibe resultado e salva high‑score */
     clear_field();
     char msg[64];
-    if (score1 > score2)
+    if (score1 > score2) {
         snprintf(msg, sizeof(msg), "Jogador 1 venceu! (%d x %d)", score1, score2);
-    else if (score2 > score1)
-        snprintf(msg, sizeof(msg), "Jogador 2 venceu! (%d x %d)", score2, score1);
-    else
-        snprintf(msg, sizeof(msg), "Empate! (%d x %d)", score1, score2);
+    } else {
+        if (score2 > score1) {
+            snprintf(msg, sizeof(msg), "Jogador 2 venceu! (%d x %d)", score2, score1);
+        } else {
+            snprintf(msg, sizeof(msg), "Empate! (%d x %d)", score1, score2);
+        }
+    }
 
-    /* Centraliza */
     int col = (MAXX - MINX - (int)strlen(msg)) / 2 + MINX + 1;
     int row = MINY + FIELD_H / 2;
     for (const char *p = msg; *p; ++p)
         screenSetChar(col++, row, *p);
     screenUpdate();
 
-    /* Pega nome do vencedor ou empate */
     keyboardDestroy();
     printf("\nDigite seu nome para salvar no ranking: ");
     char nome[20];
     fgets(nome, sizeof(nome), stdin);
-    nome[strcspn(nome, "\n")] = 0; /* remove '\n' */
+    nome[strcspn(nome, "\n")] = 0;
     if (nome[0]) {
-        hs_insert(nome, (score1 > score2) ? score1 : score2);
+        if (score1 > score2)
+            hs_insert(nome, score1);
+        else if (score2 > score1)
+            hs_insert(nome, score2);
+        else
+            hs_insert(nome, score1);
         hs_save();
     }
 
-    /* exibe top scores */
     printf("\n===== TOP %d SCORES =====\n", HS_LIMIT);
     ScoreEntry *cur = hs_head;
     int pos = 1;
@@ -297,17 +310,3 @@ int main(void) {
     timerDestroy();
     return 0;
 }
-
-/* ----------------- Makefile (salve como Makefile) -----------------
-CC = gcc
-CFLAGS = -Wall -std=c11 -I./cli-lib/include
-LDFLAGS = -L./cli-lib/lib -lcli
-
-all: air_hockey
-
-air_hockey: air_hockey.c
-	$(CC) $(CFLAGS) $< $(LDFLAGS) -o $@
-
-clean:
-	rm -f air_hockey
---------------------------------------------------------------------- */
