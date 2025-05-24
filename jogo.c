@@ -16,6 +16,8 @@
 #define TEMPO_JOGO    90
 #define ARQ_RANKING   "ranking.txt"
 #define MAX_RANKING   10
+#define INTERVALO_ACELERACAO 3
+#define FATOR_ACELERACAO 1.15
 
 void screenSetChar(int x, int y, char ch) {
     screenGotoxy(x, y);
@@ -41,6 +43,7 @@ Taco taco1, taco2;
 Disco disco;
 int pontos1 = 0, pontos2 = 0;
 time_t inicio;
+time_t ultimoAcelerado;
 Ranking *inicioRanking = NULL;
 char campo[ALTURA_CAMPO][LARGURA_CAMPO];
 
@@ -64,7 +67,6 @@ void desenharBorda() {
 void desenharPlacar() {
     int t = (int)difftime(time(NULL), inicio);
     int restante;
-
     if (TEMPO_JOGO - t > 0) {
         restante = TEMPO_JOGO - t;
     } else {
@@ -113,8 +115,9 @@ void inicializarJogo() {
     taco1.x = taco2.x = MINX + (LARGURA_CAMPO - LARGURA_TACO) / 2;
     disco.x = MINX + LARGURA_CAMPO / 2;
     disco.y = MINY + ALTURA_CAMPO / 2 + 3;
-    disco.vx = 1;
-    disco.vy = 1;
+    disco.vx = 0.5;
+    disco.vy = 0.5;
+    ultimoAcelerado = time(NULL);
 }
 
 void pausarReinicio() {
@@ -148,10 +151,20 @@ void verificarColisoes() {
     }
 }
 
+void acelerarDisco() {
+    time_t agora = time(NULL);
+    if (difftime(agora, ultimoAcelerado) >= INTERVALO_ACELERACAO) {
+        disco.vx *= FATOR_ACELERACAO;
+        disco.vy *= FATOR_ACELERACAO;
+        ultimoAcelerado = agora;
+    }
+}
+
 void atualizarDisco() {
     disco.x += disco.vx;
     disco.y += disco.vy;
     verificarColisoes();
+    acelerarDisco();
 }
 
 void processarTeclas() {
@@ -181,9 +194,11 @@ void inserirRanking(const char *nome, int pontos) {
         inicioRanking = novo;
         return;
     }
+
     Ranking *cur = inicioRanking;
     while (cur->prox && cur->prox->pontos >= pontos)
         cur = cur->prox;
+
     novo->prox = cur->prox;
     cur->prox = novo;
 }
@@ -259,6 +274,7 @@ int main() {
     char nome[20];
     fgets(nome, sizeof(nome), stdin);
     nome[strcspn(nome, "\n")] = 0;
+
     int final;
     if (pontos1 > pontos2) {
         final = pontos1;
