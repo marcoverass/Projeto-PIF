@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 #include "screen.h"
 #include "keyboard.h"
 #include "timer.h"
@@ -33,7 +34,7 @@ typedef struct {
 typedef struct Ranking {
     char nome[20];
     int pontos;
-    struct Ranking *next;
+    struct Ranking *prox;
 } Ranking;
 
 Taco taco1, taco2;
@@ -63,6 +64,7 @@ void desenharBorda() {
 void desenharPlacar() {
     int t = (int)difftime(time(NULL), inicio);
     int restante;
+
     if (TEMPO_JOGO - t > 0) {
         restante = TEMPO_JOGO - t;
     } else {
@@ -113,7 +115,11 @@ void inicializarJogo() {
     disco.y = MINY + ALTURA_CAMPO / 2 + 3;
     disco.vx = 1;
     disco.vy = 1;
-    inicio = time(NULL);
+}
+
+void pausarReinicio() {
+    renderizar();
+    sleep(3);
 }
 
 void verificarColisoes() {
@@ -123,10 +129,12 @@ void verificarColisoes() {
     if (disco.y <= MINY + 3) {
         pontos2++;
         inicializarJogo();
+        pausarReinicio();
         return;
     } else if (disco.y >= MAXY - 1) {
         pontos1++;
         inicializarJogo();
+        pausarReinicio();
         return;
     }
 
@@ -150,12 +158,12 @@ void processarTeclas() {
     if (!keyhit()) return;
     int ch = readch();
     switch (ch) {
-        case 'a': case 'A': if (taco1.x > MINX + 1) taco1.x -= 3; break;
-        case 'd': case 'D': if (taco1.x + LARGURA_TACO < MAXX - 1) taco1.x += 3; break;
+        case 'a': case 'A': if (taco1.x > MINX + 1) taco1.x -= 4; break;
+        case 'd': case 'D': if (taco1.x + LARGURA_TACO < MAXX - 1) taco1.x += 4; break;
         case 27: {
             int n1 = readch(); int n2 = readch();
-            if (n1 == 91 && n2 == 68 && taco2.x > MINX + 1) taco2.x -= 3;
-            else if (n1 == 91 && n2 == 67 && taco2.x + LARGURA_TACO < MAXX - 1) taco2.x += 3;
+            if (n1 == 91 && n2 == 68 && taco2.x > MINX + 1) taco2.x -= 4;
+            else if (n1 == 91 && n2 == 67 && taco2.x + LARGURA_TACO < MAXX - 1) taco2.x += 4;
             break;
         }
         case 'q': case 'Q': inicio -= TEMPO_JOGO; break;
@@ -163,21 +171,21 @@ void processarTeclas() {
 }
 
 void inserirRanking(const char *nome, int pontos) {
-    Ranking *new = malloc(sizeof(Ranking));
-    strcpy(new->nome, nome);
-    new->pontos = pontos;
-    new->next = NULL;
+    Ranking *novo = malloc(sizeof(Ranking));
+    strcpy(novo->nome, nome);
+    novo->pontos = pontos;
+    novo->prox = NULL;
 
     if (!inicioRanking || pontos > inicioRanking->pontos) {
-        new->next = inicioRanking;
-        inicioRanking = new;
+        novo->prox = inicioRanking;
+        inicioRanking = novo;
         return;
     }
     Ranking *cur = inicioRanking;
-    while (cur->next && cur->next->pontos >= pontos)
-        cur = cur->next;
-    new->next = cur->next;
-    cur->next = new;
+    while (cur->prox && cur->prox->pontos >= pontos)
+        cur = cur->prox;
+    novo->prox = cur->prox;
+    cur->prox = novo;
 }
 
 void salvarRanking() {
@@ -187,7 +195,7 @@ void salvarRanking() {
     int count = 0;
     while (cur && count < MAX_RANKING) {
         fprintf(f, "%s %d\n", cur->nome, cur->pontos);
-        cur = cur->next;
+        cur = cur->prox;
         count++;
     }
     fclose(f);
@@ -205,7 +213,7 @@ void carregarRanking() {
 void liberarRanking() {
     Ranking *cur = inicioRanking;
     while (cur) {
-        Ranking *tmp = cur->next;
+        Ranking *tmp = cur->prox;
         free(cur);
         cur = tmp;
     }
@@ -235,7 +243,7 @@ int main() {
         }
     }
 
-    inicio = time(NULL);  // começa o cronômetro após o 'P'
+    inicio = time(NULL);
 
     while (difftime(time(NULL), inicio) < TEMPO_JOGO) {
         if (timerTimeOver()) atualizarDisco();
@@ -257,6 +265,7 @@ int main() {
     } else {
         final = pontos2;
     }
+
     inserirRanking(nome, final);
     salvarRanking();
 
@@ -265,7 +274,7 @@ int main() {
     int posicao = 1;
     while (cur && posicao <= MAX_RANKING) {
         printf("%2d. %-15s %d\n", posicao++, cur->nome, cur->pontos);
-        cur = cur->next;
+        cur = cur->prox;
     }
 
     liberarRanking();
