@@ -219,6 +219,24 @@ int main() {
     carregarRanking();
     inicializarJogo();
 
+    // Mensagem de início
+    screenClear();
+    const char *msg = "Pressione 'P' para iniciar o jogo";
+    int pos = (MAXX - (int)strlen(msg)) / 2;
+    for (int i = 0; msg[i]; i++) {
+        screenSetChar(pos + i, MAXY / 2, msg[i]);
+    }
+    screenUpdate();
+
+    while (1) {
+        if (keyhit()) {
+            int tecla = readch();
+            if (tecla == 'p' || tecla == 'P') break;
+        }
+    }
+
+    inicio = time(NULL);  // começa o cronômetro após o 'P'
+
     while (difftime(time(NULL), inicio) < TEMPO_JOGO) {
         if (timerTimeOver()) atualizarDisco();
         processarTeclas();
@@ -244,9 +262,9 @@ int main() {
 
     printf("\n=== RANKING ===\n");
     Ranking *cur = inicioRanking;
-    int pos = 1;
-    while (cur && pos <= MAX_RANKING) {
-        printf("%2d. %-15s %d\n", pos++, cur->nome, cur->pontos);
+    int posicao = 1;
+    while (cur && posicao <= MAX_RANKING) {
+        printf("%2d. %-15s %d\n", posicao++, cur->nome, cur->pontos);
         cur = cur->next;
     }
 
